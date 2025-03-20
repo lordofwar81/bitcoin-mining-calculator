@@ -32,23 +32,23 @@ ChartJS.register(
   Filler
 );
 
-function App() {
-  // Initial input values
-  const initialInputs = {
-    hashRate: '102',
-    numMachines: '6500',
-    power: '3068',
-    costPerKwh: '0.015',
-    poolFee: '0.15',
-    hardwareCost: '5000000',
-    monthlyOpex: '55000',
-    profitShare: '100',
-    forecastMonths: '48',
-    difficultyGrowth: '20',
-    btcGrowth: '6',
-    discountRate: '8',
-  };
+// Define initialInputs outside the component
+const initialInputs = {
+  hashRate: '102',
+  numMachines: '6500',
+  power: '3068',
+  costPerKwh: '0.015',
+  poolFee: '0.15',
+  hardwareCost: '5000000',
+  monthlyOpex: '55000',
+  profitShare: '100',
+  forecastMonths: '48',
+  difficultyGrowth: '20',
+  btcGrowth: '6',
+  discountRate: '8',
+};
 
+function App() {
   // Input states
   const [hashRate, setHashRate] = useState(initialInputs.hashRate);
   const [numMachines, setNumMachines] = useState(initialInputs.numMachines);
@@ -115,7 +115,7 @@ function App() {
     setDifficultyGrowth(inputsFromUrl.difficultyGrowth);
     setBtcGrowth(inputsFromUrl.btcGrowth);
     setDiscountRate(inputsFromUrl.discountRate);
-  }, [initialInputs]); // Added initialInputs to dependency array
+  }, []); // Removed initialInputs from dependency array since it's now a constant outside the component
 
   // Fetch real-time data
   useEffect(() => {

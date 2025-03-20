@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
   Chart as ChartJS,
@@ -33,14 +33,14 @@ ChartJS.register(
 );
 
 function App() {
-  // Initial input values (updated to match the new scenario)
+  // Initial input values
   const initialInputs = {
     hashRate: '102',
     numMachines: '6500',
     power: '3068',
     costPerKwh: '0.015',
-    poolFee: '0.15', // 15 bps = 0.15%
-    hardwareCost: '5000000', // $5,000,000
+    poolFee: '0.15',
+    hardwareCost: '5000000',
     monthlyOpex: '55000',
     profitShare: '100',
     forecastMonths: '48',
@@ -85,9 +85,6 @@ function App() {
   const [heatmapHashPoolData, setHeatmapHashPoolData] = useState(null);
   const [roiGaugeData, setRoiGaugeData] = useState(null);
 
-  // Refs to store chart instances
-  const chartRefs = useRef({});
-
   // Parse URL query parameters on load
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -118,7 +115,7 @@ function App() {
     setDifficultyGrowth(inputsFromUrl.difficultyGrowth);
     setBtcGrowth(inputsFromUrl.btcGrowth);
     setDiscountRate(inputsFromUrl.discountRate);
-  }, []);
+  }, [initialInputs]); // Added initialInputs to dependency array
 
   // Fetch real-time data
   useEffect(() => {
@@ -145,13 +142,7 @@ function App() {
         setBlockReward(3.125);
 
         setLoading(false);
-        console.log('Fetched Data:', {
-          btcPrice: fetchedBtcPrice,
-          difficulty: fetchedDifficulty,
-          networkHashRate: calculatedNetworkHashRate,
-        });
       } catch (error) {
-        console.error('API Error:', error);
         alert('Failed to fetch real-time data. Using fallback values.');
         setBtcPrice(106439.12);
         setDifficulty(1.12e14);
@@ -304,7 +295,6 @@ function App() {
     navigator.clipboard.writeText(shareableUrl).then(() => {
       alert('Shareable URL copied to clipboard! Paste it to share your calculation.');
     }).catch(err => {
-      console.error('Failed to copy URL:', err);
       alert('Failed to copy URL. Please copy it manually: ' + shareableUrl);
     });
   };
@@ -341,21 +331,17 @@ function App() {
 
     // Proportion of network hash rate
     const hashFraction = hr / networkHashRate;
-    console.log('Hash Fraction:', hashFraction, 'HR:', hr, 'Network HR:', networkHashRate);
 
     // BTC mined per day (before fees)
     const btcPerDayBeforeFee = hashFraction * totalRewardPerDay;
     const btcPerDay = btcPerDayBeforeFee * (1 - fee);
-    console.log('BTC Mined/Day:', btcPerDay, 'Before Fee:', btcPerDayBeforeFee);
 
     // Initial revenue per day
     let revenuePerDay = btcPerDay * btcPrice;
-    console.log('Revenue/Day:', revenuePerDay, 'BTC Price:', btcPrice);
 
     // Power cost per day
     const powerKwh = pwr / 1000; // Total kW
     const powerCostPerDay = powerKwh * 24 * cost;
-    console.log('Power Cost/Day:', powerCostPerDay);
 
     // Daily profit (before OpEx and profit share)
     let profitPerDay = revenuePerDay - powerCostPerDay;
@@ -438,7 +424,7 @@ function App() {
       npv += monthlyCashFlow / Math.pow(1 + (discount / 12), month);
     }
 
-    // Mining vs. Buying Comparison (Updated)
+    // Mining vs. Buying Comparison
     const btcBought = hwCost / btcPrice; // BTC bought at spot price at deployment
     const buyingValue = btcBought * currentBtcPrice; // Value of bought BTC at the end
     const buyingRoi = hwCost > 0 ? ((buyingValue - hwCost) / hwCost) * 100 : 0; // Buying ROI
@@ -837,8 +823,8 @@ function App() {
               <h2>Mining vs Buying Comparison</h2>
               <p>Mining Value: ${result.comparison.miningValue.toFixed(2)}</p>
               <p>Buying Value: ${result.comparison.buyingValue.toFixed(2)}</p>
-              <p>Mining ROI: {result.comparison.miningRoi.toFixed(2)}%</p>
-              <p>Buying ROI: {result.comparison.buyingRoi.toFixed(2)}%</p>
+              <p>Mining ROI: ${result.comparison.miningRoi.toFixed(2)}%</p>
+              <p>Buying ROI: ${result.comparison.buyingRoi.toFixed(2)}%</p>
               <p>Recommendation: {result.comparison.recommendation}</p>
             </div>
             <div>

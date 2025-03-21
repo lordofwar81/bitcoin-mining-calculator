@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import axios from 'axios';
+import { debounce } from 'lodash';
+import { motion } from 'framer-motion';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -14,7 +16,6 @@ import {
   Legend,
   Filler,
 } from 'chart.js';
-import { Line, Scatter, Bar, Radar } from 'react-chartjs-2';
 import './App.css';
 
 // Register Chart.js components
@@ -32,6 +33,12 @@ ChartJS.register(
   Filler
 );
 
+// Lazy load chart components
+const Line = React.lazy(() => import('react-chartjs-2').then(module => ({ default: module.Line })));
+const Scatter = React.lazy(() => import('react-chartjs-2').then(module => ({ default: module.Scatter })));
+const Bar = React.lazy(() => import('react-chartjs-2').then(module => ({ default: module.Bar })));
+const Radar = React.lazy(() => import('react-chartjs-2').then(module => ({ default: module.Radar })));
+
 // Define initialInputs outside the component
 const initialInputs = {
   hashRate: '102',
@@ -44,8 +51,16 @@ const initialInputs = {
   profitShare: '100',
   forecastMonths: '48',
   difficultyGrowth: '20',
-  btcGrowth: '6',
+  coinGrowth: '6',
   discountRate: '8',
+  coin: 'bitcoin',
+};
+
+// Define supported coins and their properties
+const supportedCoins = {
+  bitcoin: { name: 'Bitcoin', algorithm: 'SHA-256', blockTime: 600, blockReward: 3.125, difficultyApi: 'https://blockchain.info/q/getdifficulty' },
+  litecoin: { name: 'Litecoin', algorithm: 'Scrypt', blockTime: 150, blockReward: 6.25, difficultyApi: 'https://api.blockcypher.com/v1/ltc/main' },
+  ravencoin: { name: 'Ravencoin', algorithm: 'KawPow', blockTime: 60, blockReward: 2500, difficultyApi: 'https://api-ravencoin.org/difficulty' },
 };
 
 function App() {
@@ -60,14 +75,12 @@ function App() {
   const [profitShare, setProfitShare] = useState(initialInputs.profitShare);
   const [forecastMonths, setForecastMonths] = useState(initialInputs.forecastMonths);
   const [difficultyGrowth, setDifficultyGrowth] = useState(initialInputs.difficultyGrowth);
-  const [btcGrowth, setBtcGrowth] = useState(initialInputs.btcGrowth);
+  const [coinGrowth, setCoinGrowth] = useState(initialInputs.coinGrowth);
   const [discountRate, setDiscountRate] = useState(initialInputs.discountRate);
-
-  // Input error states
-  const [errors, setErrors] = useState({});
+  const [coin, setCoin] = useState(initialInputs.coin);
 
   // API data states
-  const [btcPrice, setBtcPrice] = useState(null);
+  const [coinPrice, setCoinPrice] = useState(null);
   const [difficulty, setDifficulty] = useState(null);
   const [blockReward, setBlockReward] = useState(null);
   const [networkHashRate, setNetworkHashRate] = useState(null);
@@ -84,6 +97,116 @@ function App() {
   const [heatmapHashElecData, setHeatmapHashElecData] = useState(null);
   const [heatmapHashPoolData, setHeatmapHashPoolData] = useState(null);
   const [roiGaugeData, setRoiGaugeData] = useState(null);
+  const [sensitivityData, setSensitivityData] = useState(null); // New state for sensitivity analysis
+
+  // Input error states
+  const [errors, setErrors] = useState({});
+
+  // Calculate button state
+  const [isCalculating, setIsCalculating] = useState(false);
+
+  // Theme state
+  const [theme, setTheme] = useState('dark'); // Default to dark theme
+
+  // Detect mobile for chart options
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Particle effect state
+  const [particles, setParticles] = useState([]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Generate particles for binary code effect
+  useEffect(() => {
+    const newParticles = [];
+    for (let i = 0; i < 50; i++) {
+      newParticles.push({
+        id: i,
+        value: Math.random() > 0.5 ? '0' : '1',
+        left: Math.random() * 100 + 'vw',
+        animationDelay: Math.random() * 5 + 's',
+      });
+    }
+    setParticles(newParticles);
+  }, []);
+
+  // Chart options with mobile optimization
+  const lineChartOptions = {
+    responsive: true,
+    scales: { x: { display: false } },
+    plugins: { zoom: { zoom: { enabled: !isMobile } } },
+  };
+
+  const scatterChartOptions = {
+    responsive: true,
+    scales: {
+      x: { title: { display: true, text: 'Hash Rate (TH/s)' } },
+      y: { title: { display: true, text: 'Electricity Cost ($/kWh)' } },
+    },
+    plugins: { zoom: { zoom: { enabled: !isMobile } } },
+  };
+
+  const areaChartOptions = {
+    responsive: true,
+    elements: { line: { tension: 0.4 } },
+    plugins: { zoom: { zoom: { enabled: !isMobile } } },
+  };
+
+  const barChartOptions = {
+    responsive: true,
+    plugins: { zoom: { zoom: { enabled: !isMobile } } },
+  };
+
+  const boxChartOptions = {
+    responsive: true,
+    indexAxis: 'y',
+    plugins: { zoom: { zoom: { enabled: !isMobile } } },
+  };
+
+  const forecastChartOptions = {
+    responsive: true,
+    plugins: { zoom: { zoom: { enabled: !isMobile } } },
+  };
+
+  const heatmapOptions = {
+    responsive: true,
+    scales: {
+      x: { title: { display: true, text: 'Hash Rate (TH/s)' } },
+      y: { title: { display: true, text: isMobile ? 'Cost ($/kWh)' : 'Electricity Cost ($/kWh)' } },
+    },
+    plugins: { zoom: { zoom: { enabled: !isMobile } } },
+  };
+
+  const heatmapPoolOptions = {
+    responsive: true,
+    scales: {
+      x: { title: { display: true, text: 'Hash Rate (TH/s)' } },
+      y: { title: { display: true, text: 'Pool Fee (%)' } },
+    },
+    plugins: { zoom: { zoom: { enabled: !isMobile } } },
+  };
+
+  const sensitivityChartOptions = {
+    responsive: true,
+    scales: {
+      x: { title: { display: true, text: 'Bitcoin Price ($)' } },
+      y: { title: { display: true, text: 'Electricity Cost ($/kWh)' } },
+    },
+    plugins: { zoom: { zoom: { enabled: !isMobile } } },
+  };
+
+  const roiGaugeOptions = {
+    responsive: true,
+    scales: { r: { min: -100, max: 100 } },
+    plugins: { zoom: { zoom: { enabled: !isMobile } } },
+  };
 
   // Parse URL query parameters on load
   useEffect(() => {
@@ -99,8 +222,9 @@ function App() {
       profitShare: params.get('profitShare') || initialInputs.profitShare,
       forecastMonths: params.get('forecastMonths') || initialInputs.forecastMonths,
       difficultyGrowth: params.get('difficultyGrowth') || initialInputs.difficultyGrowth,
-      btcGrowth: params.get('btcGrowth') || initialInputs.btcGrowth,
+      coinGrowth: params.get('coinGrowth') || initialInputs.coinGrowth,
       discountRate: params.get('discountRate') || initialInputs.discountRate,
+      coin: params.get('coin') || initialInputs.coin,
     };
 
     setHashRate(inputsFromUrl.hashRate);
@@ -113,46 +237,63 @@ function App() {
     setProfitShare(inputsFromUrl.profitShare);
     setForecastMonths(inputsFromUrl.forecastMonths);
     setDifficultyGrowth(inputsFromUrl.difficultyGrowth);
-    setBtcGrowth(inputsFromUrl.btcGrowth);
+    setCoinGrowth(inputsFromUrl.coinGrowth);
     setDiscountRate(inputsFromUrl.discountRate);
-  }, []); // Removed initialInputs from dependency array since it's now a constant outside the component
+    setCoin(inputsFromUrl.coin);
+  }, []);
 
-  // Fetch real-time data
+  // Fetch real-time data based on selected coin
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // Bitcoin price from CoinGecko
         const priceResponse = await axios.get(
-          'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd'
+          `https://api.coingecko.com/api/v3/simple/price?ids=${coin}&vs_currencies=usd`
         );
-        const fetchedBtcPrice = priceResponse.data.bitcoin.usd;
-        setBtcPrice(fetchedBtcPrice);
+        const fetchedCoinPrice = priceResponse.data[coin].usd;
+        setCoinPrice(fetchedCoinPrice);
 
-        // Difficulty from Blockchain.com
-        const diffResponse = await axios.get('https://blockchain.info/q/getdifficulty');
-        const fetchedDifficulty = diffResponse.data;
+        const coinConfig = supportedCoins[coin];
+        let fetchedDifficulty;
+        if (coin === 'bitcoin') {
+          const diffResponse = await axios.get(coinConfig.difficultyApi);
+          fetchedDifficulty = diffResponse.data;
+        } else if (coin === 'litecoin') {
+          const diffResponse = await axios.get(coinConfig.difficultyApi);
+          fetchedDifficulty = diffResponse.data.difficulty;
+        } else if (coin === 'ravencoin') {
+          const diffResponse = await axios.get(coinConfig.difficultyApi);
+          fetchedDifficulty = diffResponse.data.difficulty;
+        }
         setDifficulty(fetchedDifficulty);
 
-        // Calculate network hash rate from difficulty
-        const calculatedNetworkHashRate = (fetchedDifficulty * 2 ** 32) / 600 / 1e12; // Convert to TH/s
+        const calculatedNetworkHashRate = (fetchedDifficulty * 2 ** 32) / coinConfig.blockTime / 1e12;
         setNetworkHashRate(calculatedNetworkHashRate);
-
-        // Block reward (static for now; post-2024 halving)
-        setBlockReward(3.125);
-
+        setBlockReward(coinConfig.blockReward);
         setLoading(false);
       } catch (error) {
         alert('Failed to fetch real-time data. Using fallback values.');
-        setBtcPrice(106439.12);
-        setDifficulty(1.12e14);
-        setNetworkHashRate(1445035358.28);
-        setBlockReward(3.125);
+        if (coin === 'bitcoin') {
+          setCoinPrice(106439.12);
+          setDifficulty(1.12e14);
+          setNetworkHashRate(1445035358.28);
+          setBlockReward(3.125);
+        } else if (coin === 'litecoin') {
+          setCoinPrice(80);
+          setDifficulty(2e7);
+          setNetworkHashRate(500000);
+          setBlockReward(6.25);
+        } else if (coin === 'ravencoin') {
+          setCoinPrice(0.03);
+          setDifficulty(100000);
+          setNetworkHashRate(5000);
+          setBlockReward(2500);
+        }
         setLoading(false);
       }
     };
     fetchData();
-  }, []);
+  }, [coin]);
 
   // Input validation
   const validateInputs = () => {
@@ -168,7 +309,7 @@ function App() {
       profitShare: parseFloat(profitShare),
       forecastMonths: parseFloat(forecastMonths),
       difficultyGrowth: parseFloat(difficultyGrowth),
-      btcGrowth: parseFloat(btcGrowth),
+      coinGrowth: parseFloat(coinGrowth),
       discountRate: parseFloat(discountRate),
     };
 
@@ -182,7 +323,7 @@ function App() {
     if (isNaN(fields.profitShare) || fields.profitShare < 0 || fields.profitShare > 100) newErrors.profitShare = 'Must be between 0 and 100';
     if (isNaN(fields.forecastMonths) || fields.forecastMonths <= 0) newErrors.forecastMonths = 'Must be a positive number';
     if (isNaN(fields.difficultyGrowth)) newErrors.difficultyGrowth = 'Must be a number';
-    if (isNaN(fields.btcGrowth)) newErrors.btcGrowth = 'Must be a number';
+    if (isNaN(fields.coinGrowth)) newErrors.coinGrowth = 'Must be a number';
     if (isNaN(fields.discountRate) || fields.discountRate < 0) newErrors.discountRate = 'Must be a non-negative number';
 
     setErrors(newErrors);
@@ -201,8 +342,9 @@ function App() {
     setProfitShare(initialInputs.profitShare);
     setForecastMonths(initialInputs.forecastMonths);
     setDifficultyGrowth(initialInputs.difficultyGrowth);
-    setBtcGrowth(initialInputs.btcGrowth);
+    setCoinGrowth(initialInputs.coinGrowth);
     setDiscountRate(initialInputs.discountRate);
+    setCoin(initialInputs.coin);
     setErrors({});
     setResult(null);
     setDailyProfits([]);
@@ -214,6 +356,7 @@ function App() {
     setHeatmapHashElecData(null);
     setHeatmapHashPoolData(null);
     setRoiGaugeData(null);
+    setSensitivityData(null);
   };
 
   // Export results to CSV
@@ -233,16 +376,18 @@ function App() {
     csvRows.push(headers.join(','));
 
     const metrics = [
-      ['Revenue ($)', result.daily.revenue.toFixed(2), result.monthly.revenue.toFixed(2), result.yearly.revenue.toFixed(2), '', '', ''],
-      ['Profit ($)', result.daily.profit.toFixed(2), result.monthly.profit.toFixed(2), result.yearly.profit.toFixed(2), '', '', ''],
-      ['BTC Mined', result.daily.btcMined.toFixed(8), result.monthly.btcMined.toFixed(8), result.yearly.btcMined.toFixed(8), '', '', ''],
+      [`Revenue ($)`, result.daily.revenue.toFixed(2), result.monthly.revenue.toFixed(2), result.yearly.revenue.toFixed(2), '', '', ''],
+      [`Profit ($)`, result.daily.profit.toFixed(2), result.monthly.profit.toFixed(2), result.yearly.profit.toFixed(2), '', '', ''],
+      [`${supportedCoins[coin].name} Mined`, result.daily.coinMined.toFixed(8), result.monthly.coinMined.toFixed(8), result.yearly.coinMined.toFixed(8), '', '', ''],
       ['Power Cost ($)', result.daily.powerCost.toFixed(2), result.monthly.powerCost.toFixed(2), result.yearly.powerCost.toFixed(2), '', '', ''],
       ['', '', '', '', '', '', ''],
       ['W/TH', '', '', '', result.efficiency.wPerTh.toFixed(2), '', ''],
       ['Break-even (days)', '', '', '', result.efficiency.breakEvenDays ? Math.ceil(result.efficiency.breakEvenDays) : 'Never', '', ''],
-      ['ROI/BTC (%)', '', '', '', result.efficiency.roiPerBtc.toFixed(2), '', ''],
-      ['Cost/BTC ($)', '', '', '', result.efficiency.costPerBtc.toFixed(2), '', ''],
+      [`ROI/${supportedCoins[coin].name} (%)`, '', '', '', result.efficiency.roiPerCoin.toFixed(2), '', ''],
+      [`Cost/${supportedCoins[coin].name} ($)`, '', '', '', result.efficiency.costPerCoin.toFixed(2), '', ''],
       ['NPV ($)', '', '', '', result.efficiency.npv.toFixed(2), '', ''],
+      ['Break-even Price ($)', '', '', '', result.efficiency.breakEvenPrice.toFixed(2), '', ''],
+      ['Hashrate Share (%)', '', '', '', result.efficiency.hashrateShare, '', ''],
       ['', '', '', '', '', '', ''],
       ['Mining Value ($)', '', '', '', '', result.comparison.miningValue.toFixed(2), ''],
       ['Buying Value ($)', '', '', '', '', result.comparison.buyingValue.toFixed(2), ''],
@@ -250,9 +395,9 @@ function App() {
       ['Buying ROI (%)', '', '', '', '', result.comparison.buyingRoi.toFixed(2), ''],
       ['Recommendation', '', '', '', '', result.comparison.recommendation, ''],
       ['', '', '', '', '', '', ''],
-      ['BTC Price ($)', '', '', '', '', '', result.market.btcPrice.toLocaleString()],
+      [`${supportedCoins[coin].name} Price ($)`, '', '', '', '', '', result.market.coinPrice.toLocaleString()],
       ['Difficulty', '', '', '', '', '', result.market.difficulty.toExponential(2)],
-      ['Block Reward (BTC)', '', '', '', '', '', result.market.blockReward],
+      [`Block Reward (${supportedCoins[coin].name})`, '', '', '', '', '', result.market.blockReward],
       ['Network Hash Rate (TH/s)', '', '', '', '', '', result.market.networkHashRate.toLocaleString()],
     ];
 
@@ -269,7 +414,7 @@ function App() {
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', 'bitcoin_mining_results.csv');
+    link.setAttribute('download', `${coin}_mining_results.csv`);
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -287,8 +432,9 @@ function App() {
       profitShare,
       forecastMonths,
       difficultyGrowth,
-      btcGrowth,
+      coinGrowth,
       discountRate,
+      coin,
     }).toString();
 
     const shareableUrl = `${window.location.origin}${window.location.pathname}?${params}`;
@@ -299,11 +445,13 @@ function App() {
     });
   };
 
-  const calculateProfit = () => {
+  const calculateProfit = debounce(() => {
     if (!validateInputs()) {
       alert('Please fix the input errors before calculating.');
       return;
     }
+
+    setIsCalculating(true);
 
     // Parse inputs
     const hr = parseFloat(hashRate) * parseFloat(numMachines); // Total TH/s
@@ -315,29 +463,32 @@ function App() {
     const profitShareFraction = parseFloat(profitShare) / 100 || 1;
     const months = parseFloat(forecastMonths) || 12;
     const diffGrowth = parseFloat(difficultyGrowth) / 100 || 0;
-    const btcGrowthRate = parseFloat(btcGrowth) / 100 || 0;
+    const coinGrowthRate = parseFloat(coinGrowth) / 100 || 0;
     const discount = parseFloat(discountRate) / 100 || 0;
 
     // Validate inputs
-    if (!hr || !pwr || !cost || !btcPrice || !networkHashRate || !blockReward) {
+    if (!hr || !pwr || !cost || !coinPrice || !networkHashRate || !blockReward) {
       alert('Please fill in all required fields with valid numbers!');
+      setIsCalculating(false);
       return;
     }
 
     // Constants
-    const blocksPerDay = 144; // ~10 min/block
-    const totalRewardPerDay = blockReward * blocksPerDay; // Total BTC rewarded daily
+    const coinConfig = supportedCoins[coin];
+    const blocksPerDay = 86400 / coinConfig.blockTime; // Number of blocks per day
+    const totalRewardPerDay = blockReward * blocksPerDay; // Total coin rewarded daily
     const daysPerMonth = 30;
 
-    // Proportion of network hash rate
+    // Proportion of network hashrate
     const hashFraction = hr / networkHashRate;
+    const hashrateShare = (hashFraction * 100).toFixed(2); // Percentage of network hashrate
 
-    // BTC mined per day (before fees)
-    const btcPerDayBeforeFee = hashFraction * totalRewardPerDay;
-    const btcPerDay = btcPerDayBeforeFee * (1 - fee);
+    // Coin mined per day (before fees)
+    const coinPerDayBeforeFee = hashFraction * totalRewardPerDay;
+    const coinPerDay = coinPerDayBeforeFee * (1 - fee);
 
     // Initial revenue per day
-    let revenuePerDay = btcPerDay * btcPrice;
+    let revenuePerDay = coinPerDay * coinPrice;
 
     // Power cost per day
     const powerKwh = pwr / 1000; // Total kW
@@ -346,12 +497,16 @@ function App() {
     // Daily profit (before OpEx and profit share)
     let profitPerDay = revenuePerDay - powerCostPerDay;
 
+    // Break-even Bitcoin price
+    const totalDailyCost = powerCostPerDay + (opex / daysPerMonth);
+    const breakEvenPrice = coinPerDay > 0 ? totalDailyCost / coinPerDay : 0;
+
     // Efficiency metrics
     const wPerTh = pwr / hr; // W/TH
-    const costPerBtc = btcPerDay > 0 ? powerCostPerDay / btcPerDay : 0; // $/BTC
+    const costPerCoin = coinPerDay > 0 ? powerCostPerDay / coinPerDay : 0; // $/Coin
 
     // First-month metrics (without difficulty growth)
-    const firstMonthBtcMined = btcPerDay * daysPerMonth;
+    const firstMonthCoinMined = coinPerDay * daysPerMonth;
     const firstMonthRevenue = revenuePerDay * daysPerMonth;
     const firstMonthPowerCost = powerCostPerDay * daysPerMonth;
     const firstMonthProfit = (firstMonthRevenue - firstMonthPowerCost - opex) * profitShareFraction;
@@ -360,27 +515,27 @@ function App() {
     let totalRevenue = 0;
     let totalPowerCost = 0;
     let totalOpex = 0;
-    let totalBtcMined = 0;
+    let totalCoinMined = 0;
     let currentNetworkHashRate = networkHashRate;
-    let currentBtcPrice = btcPrice;
+    let currentCoinPrice = coinPrice;
     const dailyProfitsArray = [];
     const cumulativeRevenueArray = [];
     let runningRevenue = 0;
 
     // Monthly calculations
     for (let month = 1; month <= months; month++) {
-      // Adjust network hash rate and BTC price for growth
+      // Adjust network hash rate and coin price for growth
       const monthlyDiffGrowth = (diffGrowth / 12) * month;
-      const monthlyBtcGrowth = (btcGrowthRate / 12) * month;
+      const monthlyCoinGrowth = (coinGrowthRate / 12) * month;
       currentNetworkHashRate = networkHashRate * (1 + monthlyDiffGrowth);
-      currentBtcPrice = btcPrice * (1 + monthlyBtcGrowth);
+      currentCoinPrice = coinPrice * (1 + monthlyCoinGrowth);
 
-      // Recalculate BTC mined
+      // Recalculate coin mined
       const adjustedHashFraction = hr / currentNetworkHashRate;
-      const adjustedBtcPerDay = adjustedHashFraction * totalRewardPerDay * (1 - fee);
+      const adjustedCoinPerDay = adjustedHashFraction * totalRewardPerDay * (1 - fee);
 
       // Revenue and costs for this month
-      const monthlyRevenue = adjustedBtcPerDay * daysPerMonth * currentBtcPrice;
+      const monthlyRevenue = adjustedCoinPerDay * daysPerMonth * currentCoinPrice;
       const monthlyPowerCost = powerCostPerDay * daysPerMonth;
       const monthlyProfit = (monthlyRevenue - monthlyPowerCost - opex) * profitShareFraction;
 
@@ -396,7 +551,7 @@ function App() {
       totalRevenue += monthlyRevenue;
       totalPowerCost += monthlyPowerCost;
       totalOpex += opex;
-      totalBtcMined += adjustedBtcPerDay * daysPerMonth;
+      totalCoinMined += adjustedCoinPerDay * daysPerMonth;
     }
 
     // Total profit (for other metrics)
@@ -414,8 +569,8 @@ function App() {
     // Break-even (in days)
     const breakEvenDays = dailyProfit > 0 ? (hwCost + totalOpex) / dailyProfit : null;
 
-    // ROI/BTC (based on total profit per BTC mined)
-    const roiPerBtc = totalBtcMined > 0 ? (totalProfit / totalBtcMined) / currentBtcPrice * 100 : 0;
+    // ROI/Coin (based on total profit per coin mined)
+    const roiPerCoin = totalCoinMined > 0 ? (totalProfit / totalCoinMined) / currentCoinPrice * 100 : 0;
 
     // NPV (Net Present Value)
     let npv = -hwCost;
@@ -425,21 +580,40 @@ function App() {
     }
 
     // Mining vs. Buying Comparison
-    const btcBought = hwCost / btcPrice; // BTC bought at spot price at deployment
-    const buyingValue = btcBought * currentBtcPrice; // Value of bought BTC at the end
-    const buyingRoi = hwCost > 0 ? ((buyingValue - hwCost) / hwCost) * 100 : 0; // Buying ROI
+    const coinBought = hwCost / coinPrice;
+    const buyingValue = coinBought * currentCoinPrice;
+    const buyingRoi = hwCost > 0 ? ((buyingValue - hwCost) / hwCost) * 100 : 0;
 
-    const miningValue = totalBtcMined * currentBtcPrice; // Value of mined BTC at the end
-    const miningRoi = hwCost > 0 ? ((miningValue - hwCost) / hwCost) * 100 : 0; // Mining ROI
+    const miningValue = totalCoinMined * currentCoinPrice;
+    const miningRoi = hwCost > 0 ? ((miningValue - hwCost) / hwCost) * 100 : 0;
 
     // Recommendation
     let recommendation;
     if (miningValue > buyingValue) {
-      recommendation = 'Mining is the better investment';
+      recommendation = `Mining is the better investment`;
     } else if (buyingValue > miningValue) {
-      recommendation = 'Buying at spot is the better investment';
+      recommendation = `Buying at spot is the better investment`;
     } else {
-      recommendation = 'Mining and buying are equivalent investments';
+      recommendation = `Mining and buying are equivalent investments`;
+    }
+
+    // Sensitivity Analysis (Profit vs. Bitcoin Price and Electricity Cost)
+    const sensitivity = [];
+    const priceRange = [0.8, 0.9, 1.0, 1.1, 1.2]; // ±20% of current price
+    const costRange = [0.8, 0.9, 1.0, 1.1, 1.2]; // ±20% of current electricity cost
+    for (let priceFactor of priceRange) {
+      for (let costFactor of costRange) {
+        const adjustedPrice = coinPrice * priceFactor;
+        const adjustedCost = cost * costFactor;
+        const adjustedRevenue = coinPerDay * adjustedPrice;
+        const adjustedPowerCost = powerKwh * 24 * adjustedCost;
+        const adjustedProfit = (adjustedRevenue - adjustedPowerCost - (opex / daysPerMonth)) * profitShareFraction;
+        sensitivity.push({
+          price: adjustedPrice,
+          cost: adjustedCost,
+          profit: adjustedProfit,
+        });
+      }
     }
 
     // Data for visualizations
@@ -458,7 +632,7 @@ function App() {
           ].map(point => ({ x: point.x, y: point.y, v: point.profit })),
           backgroundColor: (ctx) => {
             const value = ctx.raw?.v || 0;
-            return value >= 0 ? 'rgba(40, 167, 69, 0.7)' : 'rgba(220, 53, 69, 0.7)';
+            return value >= 0 ? 'rgba(0, 255, 0, 0.7)' : 'rgba(255, 0, 0, 0.7)';
           },
           pointRadius: 10,
         },
@@ -472,12 +646,12 @@ function App() {
         {
           label: 'Revenue ($)',
           data: [dailyRevenue, firstMonthRevenue, yearlyRevenue],
-          backgroundColor: '#f4b400',
+          backgroundColor: '#00ff00',
         },
         {
           label: 'Power Cost ($)',
           data: [powerCostPerDay, firstMonthPowerCost, yearlyPowerCost],
-          backgroundColor: '#dc3545',
+          backgroundColor: '#ff0000',
         },
       ],
     };
@@ -495,8 +669,8 @@ function App() {
             Math.max(...dailyProfitsArray) * 0.9,
             Math.max(...dailyProfitsArray),
           ] : [0, 0, 0, 0, 0],
-          backgroundColor: 'rgba(40, 167, 69, 0.5)',
-          borderColor: '#28a745',
+          backgroundColor: 'rgba(0, 255, 0, 0.5)',
+          borderColor: '#00ff00',
           borderWidth: 1,
         },
       ],
@@ -515,8 +689,8 @@ function App() {
             dailyProfitsArray[270] * 30,
             dailyProfitsArray[359] * 30,
           ] : [0, 0, 0, 0, 0],
-          backgroundColor: 'rgba(0, 123, 255, 0.2)',
-          borderColor: '#007bff',
+          backgroundColor: 'rgba(0, 255, 0, 0.2)',
+          borderColor: '#00ff00',
           borderWidth: 1,
         },
       ],
@@ -531,15 +705,15 @@ function App() {
             const hrValue = parseFloat(hashRate) * (0.8 + i * 0.1);
             const costValue = parseFloat(costPerKwh) * (0.8 + j * 0.1);
             const hashFraction = hrValue / networkHashRate;
-            const btcPerDay = hashFraction * blockReward * 144 * (1 - fee);
-            const revenue = btcPerDay * btcPrice;
+            const coinPerDay = hashFraction * blockReward * blocksPerDay * (1 - fee);
+            const revenue = coinPerDay * coinPrice;
             const powerCost = (pwr / 1000) * 24 * costValue;
             const profit = revenue - powerCost;
             return { x: hrValue, y: costValue, v: profit };
           })).flat(),
           backgroundColor: (ctx) => {
             const value = ctx.raw?.v || 0;
-            return value >= 0 ? `rgba(40, 167, 69, ${value / 10})` : `rgba(220, 53, 69, ${-value / 10})`;
+            return value >= 0 ? `rgba(0, 255, 0, ${value / 10})` : `rgba(255, 0, 0, ${-value / 10})`;
           },
           pointRadius: 20,
         },
@@ -555,15 +729,34 @@ function App() {
             const hrValue = parseFloat(hashRate) * (0.8 + i * 0.1);
             const feeValue = parseFloat(poolFee) * (0.8 + j * 0.1) / 100;
             const hashFraction = hrValue / networkHashRate;
-            const btcPerDay = hashFraction * blockReward * 144 * (1 - feeValue);
-            const revenue = btcPerDay * btcPrice;
+            const coinPerDay = hashFraction * blockReward * blocksPerDay * (1 - feeValue);
+            const revenue = coinPerDay * coinPrice;
             const powerCost = (pwr / 1000) * 24 * parseFloat(costPerKwh);
             const profit = revenue - powerCost;
             return { x: hrValue, y: feeValue * 100, v: profit };
           })).flat(),
           backgroundColor: (ctx) => {
             const value = ctx.raw?.v || 0;
-            return value >= 0 ? `rgba(40, 167, 69, ${value / 10})` : `rgba(220, 53, 69, ${-value / 10})`;
+            return value >= 0 ? `rgba(0, 255, 0, ${value / 10})` : `rgba(255, 0, 0, ${-value / 10})`;
+          },
+          pointRadius: 20,
+        },
+      ],
+    };
+
+    // Data for Sensitivity Analysis Heatmap (Bitcoin Price vs. Electricity Cost)
+    const sensitivityChartData = {
+      datasets: [
+        {
+          label: 'Profit ($)',
+          data: sensitivity.map(item => ({
+            x: item.price,
+            y: item.cost,
+            v: item.profit,
+          })),
+          backgroundColor: (ctx) => {
+            const value = ctx.raw?.v || 0;
+            return value >= 0 ? `rgba(0, 255, 0, ${Math.min(value / 1000, 1)})` : `rgba(255, 0, 0, ${Math.min(-value / 1000, 1)})`;
           },
           pointRadius: 20,
         },
@@ -577,8 +770,8 @@ function App() {
         {
           label: 'Mining ROI (%)',
           data: [miningRoi],
-          backgroundColor: 'rgba(244, 180, 0, 0.5)',
-          borderColor: '#f4b400',
+          backgroundColor: 'rgba(0, 255, 0, 0.5)',
+          borderColor: '#00ff00',
           borderWidth: 1,
         },
       ],
@@ -592,16 +785,22 @@ function App() {
     setHeatmapHashElecData(heatmapHashElecData);
     setHeatmapHashPoolData(heatmapHashPoolData);
     setRoiGaugeData(roiGaugeData);
+    setSensitivityData(sensitivityChartData);
 
     setResult({
-      daily: { revenue: dailyRevenue, profit: dailyProfit, btcMined: btcPerDay, powerCost: powerCostPerDay },
-      monthly: { revenue: firstMonthRevenue, profit: firstMonthProfit, btcMined: firstMonthBtcMined, powerCost: firstMonthPowerCost },
-      yearly: { revenue: yearlyRevenue, profit: yearlyProfit, btcMined: (totalBtcMined / months) * 12, powerCost: yearlyPowerCost },
-      efficiency: { wPerTh, breakEvenDays, roiPerBtc, costPerBtc, npv },
+      daily: { revenue: dailyRevenue, profit: dailyProfit, coinMined: coinPerDay, powerCost: powerCostPerDay },
+      monthly: { revenue: firstMonthRevenue, profit: firstMonthProfit, coinMined: firstMonthCoinMined, powerCost: firstMonthPowerCost },
+      yearly: { revenue: yearlyRevenue, profit: yearlyProfit, coinMined: (totalCoinMined / months) * 12, powerCost: yearlyPowerCost },
+      efficiency: { wPerTh, breakEvenDays, roiPerCoin, costPerCoin, npv, breakEvenPrice, hashrateShare },
       comparison: { miningValue, buyingValue, miningRoi, buyingRoi, recommendation },
-      market: { btcPrice: currentBtcPrice, difficulty, blockReward, networkHashRate: currentNetworkHashRate }
+      market: { coinPrice: currentCoinPrice, difficulty, blockReward, networkHashRate: currentNetworkHashRate }
     });
-  };
+
+    // Simulate calculation delay for effect
+    setTimeout(() => {
+      setIsCalculating(false);
+    }, 1000);
+  }, 500);
 
   // Define lineData and areaData using state variables
   const lineData = {
@@ -610,8 +809,8 @@ function App() {
       {
         label: 'Daily Profit ($)',
         data: dailyProfits,
-        borderColor: '#f4b400',
-        backgroundColor: 'rgba(244, 180, 0, 0.2)',
+        borderColor: '#00ff00',
+        backgroundColor: 'rgba(0, 255, 0, 0.2)',
         fill: true,
       },
     ],
@@ -623,15 +822,20 @@ function App() {
       {
         label: 'Cumulative Revenue ($)',
         data: cumulativeRevenue,
-        borderColor: '#007bff',
-        backgroundColor: 'rgba(0, 123, 255, 0.3)',
+        borderColor: '#00ff00',
+        backgroundColor: 'rgba(0, 255, 0, 0.3)',
         fill: true,
       },
     ],
   };
 
+  // Toggle theme
+  const toggleTheme = () => {
+    setTheme(theme === 'dark' ? 'light' : 'dark');
+  };
+
   if (loading) return (
-    <div className="App">
+    <div className={`App ${theme}`}>
       <div className="loading-spinner">
         <div className="spinner"></div>
         <p>Loading real-time data...</p>
@@ -640,13 +844,66 @@ function App() {
   );
 
   return (
-    <div className="App">
-      <h1>Bitcoin Mining Calculator</h1>
-      <div className="live-price">
-        <p>Live BTC Price: ${btcPrice?.toLocaleString()}</p>
-      </div>
-      <div className="input-section">
+    <div className={`App ${theme}`}>
+      {/* Particle effect for floating binary code (only in dark mode) */}
+      {theme === 'dark' && (
+        <div className="particles">
+          {particles.map(particle => (
+            <span
+              key={particle.id}
+              className="particle"
+              style={{
+                left: particle.left,
+                animationDelay: particle.animationDelay,
+              }}
+            >
+              {particle.value}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <motion.div
+        className="theme-toggle"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5 }}
+      >
+        <button onClick={toggleTheme}>
+          {theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+        </button>
+      </motion.div>
+
+      <motion.h1
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+      >
+        {supportedCoins[coin].name} Mining Calculator
+      </motion.h1>
+      <motion.div
+        className="live-price"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.2, duration: 0.5 }}
+      >
+        <p>Live {supportedCoins[coin].name} Price: ${coinPrice?.toLocaleString()}</p>
+      </motion.div>
+      <motion.div
+        className="input-section"
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ delay: 0.4, duration: 0.5 }}
+      >
         <h2>Inputs</h2>
+        <div className="input-group">
+          <label>Cryptocurrency:</label>
+          <select value={coin} onChange={(e) => setCoin(e.target.value)}>
+            {Object.keys(supportedCoins).map(coinKey => (
+              <option key={coinKey} value={coinKey}>{supportedCoins[coinKey].name}</option>
+            ))}
+          </select>
+        </div>
         <div className="input-group">
           <label>Hash Rate per Machine (TH/s):</label>
           <input
@@ -758,15 +1015,15 @@ function App() {
           {errors.difficultyGrowth && <span className="error">{errors.difficultyGrowth}</span>}
         </div>
         <div className="input-group">
-          <label>Annual BTC Growth (%):</label>
+          <label>Annual {supportedCoins[coin].name} Growth (%):</label>
           <input
             type="number"
-            value={btcGrowth}
-            onChange={(e) => setBtcGrowth(e.target.value)}
+            value={coinGrowth}
+            onChange={(e) => setCoinGrowth(e.target.value)}
             onBlur={validateInputs}
             placeholder="e.g., 0"
           />
-          {errors.btcGrowth && <span className="error">{errors.btcGrowth}</span>}
+          {errors.coinGrowth && <span className="error">{errors.coinGrowth}</span>}
         </div>
         <div className="input-group">
           <label>Discount Rate (%):</label>
@@ -780,101 +1037,126 @@ function App() {
           {errors.discountRate && <span className="error">{errors.discountRate}</span>}
         </div>
         <div className="button-group">
-          <button onClick={calculateProfit}>Calculate</button>
+          <button onClick={calculateProfit} disabled={isCalculating}>
+            {isCalculating ? 'Processing...' : 'Calculate'}
+          </button>
           <button onClick={resetForm} className="secondary">Reset</button>
           {result && <button onClick={exportToCSV} className="secondary">Export to CSV</button>}
           {result && <button onClick={shareUrl} className="secondary">Share URL</button>}
         </div>
-      </div>
-
+      </motion.div>
       {result && (
-        <div className="result-section">
+        <motion.div
+          className="result-section"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.8, duration: 0.5 }}
+        >
           <div className="metrics">
-            <div>
-              <h2>Daily Metrics</h2>
-              <p>Revenue: ${result.daily.revenue.toFixed(2)}</p>
-              <p>Profit: <span className={result.daily.profit >= 0 ? 'positive' : 'negative'}>${result.daily.profit.toFixed(2)}</span></p>
-              <p>BTC Mined: {result.daily.btcMined.toFixed(8)}</p>
-              <p>Power Cost: ${result.daily.powerCost.toFixed(2)}</p>
-            </div>
-            <div>
-              <h2>Monthly Metrics</h2>
-              <p>Revenue: ${result.monthly.revenue.toFixed(2)}</p>
-              <p>Profit: <span className={result.monthly.profit >= 0 ? 'positive' : 'negative'}>${result.monthly.profit.toFixed(2)}</span></p>
-              <p>BTC Mined: {result.monthly.btcMined.toFixed(8)}</p>
-              <p>Power Cost: ${result.monthly.powerCost.toFixed(2)}</p>
-            </div>
-            <div>
-              <h2>Yearly Metrics</h2>
-              <p>Revenue: ${result.yearly.revenue.toFixed(2)}</p>
-              <p>Profit: <span className={result.yearly.profit >= 0 ? 'positive' : 'negative'}>${result.yearly.profit.toFixed(2)}</span></p>
-              <p>BTC Mined: {result.yearly.btcMined.toFixed(8)}</p>
-              <p>Power Cost: ${result.yearly.powerCost.toFixed(2)}</p>
-            </div>
-            <div>
-              <h2>Efficiency Metrics</h2>
-              <p>W/TH: {result.efficiency.wPerTh.toFixed(2)}</p>
-              <p>Break-even: {result.efficiency.breakEvenDays ? `${Math.ceil(result.efficiency.breakEvenDays)} days` : 'Never'}</p>
-              <p>ROI/BTC: {result.efficiency.roiPerBtc.toFixed(2)}%</p>
-              <p>Cost/BTC: ${result.efficiency.costPerBtc.toFixed(2)}</p>
-              <p>NPV: ${result.efficiency.npv.toFixed(2)}</p>
-            </div>
-            <div>
-              <h2>Mining vs Buying Comparison</h2>
-              <p>Mining Value: ${result.comparison.miningValue.toFixed(2)}</p>
-              <p>Buying Value: ${result.comparison.buyingValue.toFixed(2)}</p>
-              <p>Mining ROI: ${result.comparison.miningRoi.toFixed(2)}%</p>
-              <p>Buying ROI: ${result.comparison.buyingRoi.toFixed(2)}%</p>
-              <p>Recommendation: {result.comparison.recommendation}</p>
-            </div>
-            <div>
-              <h2>Market Data</h2>
-              <p>BTC Price: ${result.market.btcPrice.toLocaleString()}</p>
-              <p>Difficulty: {result.market.difficulty.toExponential(2)}</p>
-              <p>Block Reward: {result.market.blockReward} BTC</p>
-              <p>Network Hash Rate: {result.market.networkHashRate.toLocaleString()} TH/s</p>
-            </div>
+            {[
+              {
+                title: 'Daily Metrics',
+                data: [
+                  { label: 'Revenue', value: `$${result.daily.revenue.toFixed(2)}` },
+                  { label: 'Profit', value: `$${result.daily.profit.toFixed(2)}`, className: result.daily.profit >= 0 ? 'positive' : 'negative' },
+                  { label: `${supportedCoins[coin].name} Mined`, value: result.daily.coinMined.toFixed(8) },
+                  { label: 'Power Cost', value: `$${result.daily.powerCost.toFixed(2)}` },
+                ],
+              },
+              {
+                title: 'Monthly Metrics',
+                data: [
+                  { label: 'Revenue', value: `$${result.monthly.revenue.toFixed(2)}` },
+                  { label: 'Profit', value: `$${result.monthly.profit.toFixed(2)}`, className: result.monthly.profit >= 0 ? 'positive' : 'negative' },
+                  { label: `${supportedCoins[coin].name} Mined`, value: result.monthly.coinMined.toFixed(8) },
+                  { label: 'Power Cost', value: `$${result.monthly.powerCost.toFixed(2)}` },
+                ],
+              },
+              {
+                title: 'Yearly Metrics',
+                data: [
+                  { label: 'Revenue', value: `$${result.yearly.revenue.toFixed(2)}` },
+                  { label: 'Profit', value: `$${result.yearly.profit.toFixed(2)}`, className: result.yearly.profit >= 0 ? 'positive' : 'negative' },
+                  { label: `${supportedCoins[coin].name} Mined`, value: result.yearly.coinMined.toFixed(8) },
+                  { label: 'Power Cost', value: `$${result.yearly.powerCost.toFixed(2)}` },
+                ],
+              },
+              {
+                title: 'Efficiency Metrics',
+                data: [
+                  { label: 'W/TH', value: result.efficiency.wPerTh.toFixed(2) },
+                  { label: 'Break-even', value: result.efficiency.breakEvenDays ? `${Math.ceil(result.efficiency.breakEvenDays)} days` : 'Never' },
+                  { label: `ROI/${supportedCoins[coin].name}`, value: `${result.efficiency.roiPerCoin.toFixed(2)}%` },
+                  { label: `Cost/${supportedCoins[coin].name}`, value: `$${result.efficiency.costPerCoin.toFixed(2)}` },
+                  { label: 'NPV', value: `$${result.efficiency.npv.toFixed(2)}` },
+                  { label: 'Break-even Price', value: `$${result.efficiency.breakEvenPrice.toFixed(2)}` },
+                  { label: 'Hashrate Share', value: `${result.efficiency.hashrateShare}%` },
+                ],
+              },
+              {
+                title: 'Mining vs Buying Comparison',
+                data: [
+                  { label: 'Mining Value', value: `$${result.comparison.miningValue.toFixed(2)}` },
+                  { label: 'Buying Value', value: `$${result.comparison.buyingValue.toFixed(2)}` },
+                  { label: 'Mining ROI', value: `${result.comparison.miningRoi.toFixed(2)}%` },
+                  { label: 'Buying ROI', value: `${result.comparison.buyingRoi.toFixed(2)}%` },
+                  { label: 'Recommendation', value: result.comparison.recommendation },
+                ],
+              },
+              {
+                title: 'Market Data',
+                data: [
+                  { label: `${supportedCoins[coin].name} Price`, value: `$${result.market.coinPrice.toLocaleString()}` },
+                  { label: 'Difficulty', value: result.market.difficulty.toExponential(2) },
+                  { label: 'Block Reward', value: `${result.market.blockReward} ${supportedCoins[coin].name}` },
+                  { label: 'Network Hash Rate', value: `${result.market.networkHashRate.toLocaleString()} TH/s` },
+                ],
+              },
+            ].map((section, index) => (
+              <motion.div
+                key={section.title}
+                className="metric-card"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 * index, duration: 0.5 }}
+              >
+                <h2>{section.title}</h2>
+                {section.data.map(item => (
+                  <p key={item.label}>
+                    {item.label}: <span className={item.className}>{item.value}</span>
+                  </p>
+                ))}
+              </motion.div>
+            ))}
           </div>
-
           <div className="visualizations">
-            <div className="chart">
-              <h2>Line Chart: Profit Over Time</h2>
-              <Line key="line-chart" data={lineData} options={{ responsive: true, scales: { x: { display: false } } }} />
-            </div>
-            <div className="chart">
-              <h2>Scatter Chart: Hash Rate vs. Electricity Cost</h2>
-              {scatterData && <Scatter key="scatter-chart" data={scatterData} options={{ responsive: true, scales: { x: { title: { display: true, text: 'Hash Rate (TH/s)' } }, y: { title: { display: true, text: 'Electricity Cost ($/kWh)' } } } }} />}
-            </div>
-            <div className="chart">
-              <h2>Area Chart: Cumulative Revenue</h2>
-              <Line key="area-chart" data={areaData} options={{ responsive: true, elements: { line: { tension: 0.4 } } }} />
-            </div>
-            <div className="chart">
-              <h2>Bar Chart: Revenue vs. Costs</h2>
-              {barData && <Bar key="bar-chart" data={barData} options={{ responsive: true }} />}
-            </div>
-            <div className="chart">
-              <h2>Box Plot: Profit Distribution</h2>
-              {boxData && <Bar key="box-chart" data={boxData} options={{ responsive: true, indexAxis: 'y' }} />}
-            </div>
-            <div className="chart">
-              <h2>Forecast Chart: Future Profit</h2>
-              {forecastData && <Radar key="forecast-chart" data={forecastData} options={{ responsive: true }} />}
-            </div>
-            <div className="chart">
-              <h2>Heatmap: Hash Rate vs. Electricity Cost</h2>
-              {heatmapHashElecData && <Scatter key="heatmap-hash-elec" data={heatmapHashElecData} options={{ responsive: true, scales: { x: { title: { display: true, text: 'Hash Rate (TH/s)' } }, y: { title: { display: true, text: 'Electricity Cost ($/kWh)' } } } }} />}
-            </div>
-            <div className="chart">
-              <h2>Heatmap: Hash Rate vs. Pool Fee</h2>
-              {heatmapHashPoolData && <Scatter key="heatmap-hash-pool" data={heatmapHashPoolData} options={{ responsive: true, scales: { x: { title: { display: true, text: 'Hash Rate (TH/s)' } }, y: { title: { display: true, text: 'Pool Fee (%)' } } } }} />}
-            </div>
-            <div className="chart">
-              <h2>ROI Gauge</h2>
-              {roiGaugeData && <Radar key="roi-gauge" data={roiGaugeData} options={{ responsive: true, scales: { r: { min: -100, max: 100 } } }} />}
-            </div>
+            {[
+              { title: 'Line Chart: Profit Over Time', component: <Line key="line-chart" data={lineData} options={lineChartOptions} /> },
+              { title: 'Scatter Chart: Hash Rate vs. Electricity Cost', component: scatterData && <Scatter key="scatter-chart" data={scatterData} options={scatterChartOptions} /> },
+              { title: 'Area Chart: Cumulative Revenue', component: <Line key="area-chart" data={areaData} options={areaChartOptions} /> },
+              { title: 'Bar Chart: Revenue vs. Costs', component: barData && <Bar key="bar-chart" data={barData} options={barChartOptions} /> },
+              { title: 'Box Plot: Profit Distribution', component: boxData && <Bar key="box-chart" data={boxData} options={boxChartOptions} /> },
+              { title: 'Forecast Chart: Future Profit', component: forecastData && <Radar key="forecast-chart" data={forecastData} options={forecastChartOptions} /> },
+              { title: 'Heatmap: Hash Rate vs. Electricity Cost', component: heatmapHashElecData && <Scatter key="heatmap-hash-elec" data={heatmapHashElecData} options={heatmapOptions} /> },
+              { title: 'Heatmap: Hash Rate vs. Pool Fee', component: heatmapHashPoolData && <Scatter key="heatmap-hash-pool" data={heatmapHashPoolData} options={heatmapPoolOptions} /> },
+              { title: 'Sensitivity Analysis: Bitcoin Price vs. Electricity Cost', component: sensitivityData && <Scatter key="sensitivity-chart" data={sensitivityData} options={sensitivityChartOptions} /> },
+              { title: 'ROI Gauge', component: roiGaugeData && <Radar key="roi-gauge" data={roiGaugeData} options={roiGaugeOptions} /> },
+            ].map((chart, index) => (
+              <motion.div
+                key={chart.title}
+                className="chart-card"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.2 * index, duration: 0.5 }}
+              >
+                <h2>{chart.title}</h2>
+                <Suspense fallback={<div>Loading Chart...</div>}>
+                  {chart.component}
+                </Suspense>
+              </motion.div>
+            ))}
           </div>
-        </div>
+        </motion.div>
       )}
     </div>
   );
